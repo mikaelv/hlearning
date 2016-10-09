@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module HLearning.NeuralNetwork where
 
@@ -9,16 +10,23 @@ import Numeric.LinearAlgebra.Static
 import qualified Numeric.LinearAlgebra as LA
 import qualified Data.Vector.Storable as V
 import HLearning.Util
+import HLearning.GradientDescent
+
+data NNModel = Theta { theta1 :: L 25 65, theta2 :: L 10 26 } deriving Show
 
 
-trainNetwork :: [Int] -> [[Int]] -> (L 25 65, L 10 26)
-trainNetwork labels features =
-  let theta1Init = konst 1-- TODO random init
-      theta2Init = konst 1
-      Just y = (create . listToVector) labels :: Maybe (R 3823)
+trainNetwork :: [Int] -> [[Int]] -> NNModel -> NNModel
+trainNetwork labels features initModel =
+  let Just y = (create . listToVector) labels :: Maybe (R 3823)
       Just x = (create . LA.fromRows . map listToVector) features :: Maybe (L 3823 64)
-      initCost = cost x y theta1Init theta2Init
-  in (theta1Init, theta2Init)
+      lambda = 1 -- regularisation
+      function = cost x y lambda
+      tolerance = 1e-9
+      stop (Params prev) (Params cur) = abs (fst (function prev) - fst (function cur)) < tolerance
+      stopCond = StopWhen stop
+      alpha = 0.1
+      nnModel = model $ gradientDescent function stopCond alpha (Params initModel)
+  in nnModel
 
 listToVector = LA.vector . map fromIntegral
 
@@ -35,8 +43,8 @@ parseFile s = unzip $ parseLine <$> lines s
 -- y: label corresponding to training examples
 -- theta1 : nb of rows in hidden layer * (nb_of_features +1)
 -- theta2 : nb of rows in output layer * (nb_of_rows(theta1) +1)
-cost :: L 3823 64 -> R 3823 -> L 25 65 -> L 10 26 -> Double
-cost x y theta1 theta2 =
+cost :: L 3823 64 -> R 3823 -> Double -> NNModel -> (Double, NNModel)
+cost x y lambda (Theta theta1 theta2) =
   let a1 = (addOnes . tr) x
       z2 = theta1 <> a1
       a2 = addOnes $ sigmoid z2
@@ -47,10 +55,12 @@ cost x y theta1 theta2 =
       jmat = yb * log h - yb * log (1 - h)
       m = fromIntegral $ size y
       -- TODO regularization
-  in - (LA.sumElements . extract) jmat / m
+      j = - (LA.sumElements . extract) jmat / m
+      (gradTheta1, gradTheta2) = backpropagate yb lambda theta1 theta2 z2 a1 a2 a3
+  in (j, Theta gradTheta1 gradTheta2)
 
 
-backpropagate :: L 3823 10 -> Double -> L 25 65 -> L 10 26 -> L 25 3823 -> L 65 3823 -> L 26 3823 -> L 10 3823 -> Double
+backpropagate :: L 3823 10 -> Double -> L 25 65 -> L 10 26 -> L 25 3823 -> L 65 3823 -> L 26 3823 -> L 10 3823 -> (L 25 65, L 10 26)
 backpropagate yb lambda theta1 theta2 z2 a1 a2 a3 =
   let delta3 = a3 - tr yb
       delta2a = tr theta2 <> delta3
@@ -59,9 +69,30 @@ backpropagate yb lambda theta1 theta2 z2 a1 a2 a3 =
       d2 = delta3 <> tr a2
       d1 = delta2 <> tr a1
       m = 3823
+      gradTheta1NonReg  = (d1 / konst m)
+      gradTheta2NonReg  = (d2 / konst m)
       regulCoef = lambda / m
-      gradTheta1 = (d1 / konst m) + (konst regulCoef * theta1)
-  in 3
+      gradTheta1 = (d1 / konst m) + (konst regulCoef * theta1) -- TODO not for the first column
+  in (gradTheta1NonReg, gradTheta2NonReg)
+
+
+
+instance GradientDescent (NNModel -> (Double, NNModel)) where
+  data Params (NNModel -> (Double, NNModel)) = Params { model :: NNModel }
+
+
+  grad f (Params nnModel) =
+    let (cost, gradTheta) = f nnModel
+    in Params gradTheta
+
+
+  paramMove scale (Params (Theta gradTheta1 gradTheta2)) (Params (Theta theta1 theta2)) =
+    let newTheta1 = theta1 + gradTheta1 * konst scale
+        newTheta2 = theta2 + gradTheta2 * konst scale
+    --let newLocation = old + fromRational (toRational scale) * vec
+    in Params (Theta newTheta1 newTheta2)
+    --in VecArg newLocation
+
 
 multScalar :: (KnownNat m, KnownNat n) => L m n -> Double -> L m n
 multScalar m d = m * konst d
