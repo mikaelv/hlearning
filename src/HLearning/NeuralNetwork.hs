@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Rank2Types #-}
 
 module HLearning.NeuralNetwork where
 
@@ -13,16 +14,17 @@ import HLearning.Util
 import HLearning.GradientDescent
 import Debug.Trace
 
-data NNModel = Theta { theta1 :: L 25 65, theta2 :: L 10 26 } deriving Show
+-- n1: nb of features + 1 (bias layer)
+data NNModel n1 = Theta { theta1 :: L 25 n1, theta2 :: L 10 26 } deriving Show
 
-predict :: NNModel -> [Int] -> Int
+predict :: (KnownNat n, KnownNat n1, n1 ~ (1+n)) => NNModel (1+n) -> R n -> Int
 predict nnModel features =
-  let Just x = listToVector features :: Maybe (R 64)
-      (h, a3, z3, a2, z2, a1) = feedForward nnModel (row x)
+  let (h, a3, z3, a2, z2, a1) = feedForward nnModel (row features)
   in (V.maxIndex . unwrap . unrow) h
 
 -- m: number of training examples
-feedForward :: (KnownNat m) => NNModel -> L m 64 -> (L m 10, L 10 m, L 10 m, L 26 m, L 25 m, L 65 m)
+-- n: number of features
+feedForward :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => NNModel n1 -> L m n -> (L m 10, L 10 m, L 10 m, L 26 m, L 25 m, L n1 m)
 feedForward (Theta theta1 theta2) x =
   let a1 = (addOnes . tr) x
       z2 = theta1 <> a1
@@ -32,19 +34,16 @@ feedForward (Theta theta1 theta2) x =
       h = tr a3
   in (h, a3, z3, a2, z2, a1)
 
-
-trainNetwork :: [Int] -> [[Int]] -> NNModel -> NNModel
-trainNetwork labels features initModel =
-  let Just y = listToVector labels :: Maybe (R 3823)
-      Just x = listOfListToMatrix features :: Maybe (L 3823 64)
-      lambda = 1 -- regularisation
-      function = cost x y lambda
-      tolerance = 1e-5
-      --stop (Params prev) (Params cur) = abs (fst (function prev) - fst (function cur)) < tolerance
-      stop (Params prev) (Params cur) = abs (fst (function cur)) < 0.1
-      stopCond = StopWhen stop
-      alpha = 0.01
-      nnModel = model $ gradientDescent function stopCond alpha (Params initModel)
+trainNetwork :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => R m -> L m n -> NNModel n1 -> NNModel n1
+trainNetwork y x initModel =
+  let  lambda = 1 -- regularisation
+       function = cost x y lambda
+       --tolerance = 1e-5
+       --stop (Params prev) (Params cur) = abs (fst (function prev) - fst (function cur)) < tolerance
+       stop (Params prev) (Params cur) = abs (fst (function cur)) < 0.1
+       stopCond = StopWhen stop
+       alpha = 0.01
+       nnModel = model $ gradientDescent function stopCond alpha (Params initModel)
   in nnModel
 
 listToVector :: KnownNat m => [Int] -> Maybe (R m)
@@ -66,7 +65,7 @@ parseFile s = unzip $ parseLine <$> lines s
 -- y: label corresponding to training examples
 -- theta1 : nb of rows in hidden layer * (nb_of_features +1)
 -- theta2 : nb of rows in output layer * (nb_of_rows(theta1) +1)
-cost :: L 3823 64 -> R 3823 -> Double -> NNModel -> (Double, NNModel)
+cost :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => L m n -> R m -> Double -> NNModel n1 -> (Double, NNModel n1)
 cost x y lambda nnModel =
   let (h, a3, z3, a2, z2, a1) = feedForward nnModel x
       yb = toBinMatrix y
@@ -77,12 +76,14 @@ cost x y lambda nnModel =
       (gradTheta1, gradTheta2) = backpropagate yb lambda nnModel z2 a1 a2 a3
   in (traceShowId j, Theta gradTheta1 gradTheta2)
 
+headTailMatrix :: forall m n . (KnownNat m, KnownNat n, 1<=m) => L m n -> (L 1 n, L (m-1) n)
+headTailMatrix = splitRows
 
-backpropagate :: L 3823 10 -> Double -> NNModel -> L 25 3823 -> L 65 3823 -> L 26 3823 -> L 10 3823 -> (L 25 65, L 10 26)
+backpropagate :: (KnownNat m, KnownNat n1) => L m 10 -> Double -> NNModel n1 -> L 25 m -> L n1 m -> L 26 m -> L 10 m -> (L 25 n1, L 10 26)
 backpropagate yb lambda (Theta theta1 theta2) z2 a1 a2 a3 =
   let delta3 = a3 - tr yb
       delta2a = tr theta2 <> delta3
-      delta2b = snd (splitRows delta2a :: (L 1 3823, L 25 3823)) -- TODO replace 3823 with m does not compile here !?
+      delta2b = snd (headTailMatrix delta2a)
       delta2 = delta2b * sigmoidGradient z2
       d2 = delta3 <> tr a2
       d1 = delta2 <> tr a1
@@ -95,8 +96,8 @@ backpropagate yb lambda (Theta theta1 theta2) z2 a1 a2 a3 =
 
 
 
-instance GradientDescent (NNModel -> (Double, NNModel)) where
-  data Params (NNModel -> (Double, NNModel)) = Params { model :: NNModel }
+instance (KnownNat n1) => GradientDescent (NNModel n1 -> (Double, NNModel n1)) where
+  data Params (NNModel n1 -> (Double, NNModel n1)) = Params { model :: NNModel n1 }
 
 
   grad f (Params nnModel) =
