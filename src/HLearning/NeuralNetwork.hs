@@ -24,9 +24,10 @@ predict nnModel features =
 
 -- m: number of training examples
 -- n: number of features
-feedForward :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => NNModel n1 -> L m n -> (L m 10, L 10 m, L 10 m, L 26 m, L 25 m, L n1 m)
-feedForward (Theta theta1 theta2) x =
-  let a1 = (addOnes . tr) x
+feedForward :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), 1<=m) => NNModel n1 -> L m n -> (L m 10, L 10 m, L 10 m, L 26 m, L 25 m, L n1 m)
+feedForward nnModel x =
+  let Theta theta1 theta2 = nnModel
+      a1 = (addOnes . tr) x
       z2 = theta1 <> a1
       a2 = addOnes $ sigmoid z2
       z3 = theta2 <> a2
@@ -34,7 +35,7 @@ feedForward (Theta theta1 theta2) x =
       h = tr a3
   in (h, a3, z3, a2, z2, a1)
 
-trainNetwork :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => R m -> L m n -> NNModel n1 -> NNModel n1
+trainNetwork :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), 1<=m) => R m -> L m n -> NNModel n1 -> NNModel n1
 trainNetwork y x initModel =
   let  lambda = 1 -- regularisation
        function = cost x y lambda
@@ -46,40 +47,40 @@ trainNetwork y x initModel =
        nnModel = model $ gradientDescent function stopCond alpha (Params initModel)
   in nnModel
 
-listToVector :: KnownNat m => [Int] -> Maybe (R m)
-listToVector lst = (create . LA.vector . map fromIntegral) lst :: KnownNat m1 => Maybe (R m1)
+listToVector :: KnownNat m => [Double] -> Maybe (R m)
+listToVector lst = (create . LA.vector) lst :: KnownNat m1 => Maybe (R m1)
 
-listOfListToMatrix :: (KnownNat m, KnownNat n) => [[Int]] -> Maybe (L m n)
-listOfListToMatrix listOfList = (create . LA.fromRows . map (LA.vector . map fromIntegral) ) listOfList :: (KnownNat m1, KnownNat n1) => Maybe (L m1 n1)
+listOfListToMatrix :: (KnownNat m, KnownNat n, Num a) => [[Double]] -> Maybe (L m n)
+listOfListToMatrix listOfList = (create . LA.fromRows . map LA.vector ) listOfList :: (KnownNat m1, KnownNat n1) => Maybe (L m1 n1)
 
 -- returns label, feature vector
-parseLine :: String -> (Int, [Int])
+parseLine :: String -> (Double, [Double])
 parseLine s =
-  let ints = (reverse . read) ("[" ++ s ++ "]") :: [Int]
+  let ints = (reverse . read) ("[" ++ s ++ "]") :: [Double]
   in (head ints, reverse $ tail ints)
 
-parseFile :: String -> ([Int], [[Int]])
+parseFile :: String -> ([Double], [[Double]])
 parseFile s = unzip $ parseLine <$> lines s
 
 -- x: nb of training examples * nb_of_features
 -- y: label corresponding to training examples
 -- theta1 : nb of rows in hidden layer * (nb_of_features +1)
 -- theta2 : nb of rows in output layer * (nb_of_rows(theta1) +1)
-cost :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n)) => L m n -> R m -> Double -> NNModel n1 -> (Double, NNModel n1)
+cost :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), 1<=m) => L m n -> R m -> Double -> NNModel n1 -> (Double, NNModel n1)
 cost x y lambda nnModel =
   let (h, a3, z3, a2, z2, a1) = feedForward nnModel x
       yb = toBinMatrix y
-      jmat = yb * log h - yb * log (1 - h)
+      jmat = yb * (log h) + (1-yb) * log (1 - h)
       m = fromIntegral $ size y
       -- TODO regularization
       j = - (LA.sumElements . extract) jmat / m
-      (gradTheta1, gradTheta2) = backpropagate yb lambda nnModel z2 a1 a2 a3
-  in (traceShowId j, Theta gradTheta1 gradTheta2)
+      grad = nnModel --backpropagate yb lambda nnModel z2 a1 a2 a3
+  in (j, grad)
 
 headTailMatrix :: forall m n . (KnownNat m, KnownNat n, 1<=m) => L m n -> (L 1 n, L (m-1) n)
 headTailMatrix = splitRows
 
-backpropagate :: (KnownNat m, KnownNat n1) => L m 10 -> Double -> NNModel n1 -> L 25 m -> L n1 m -> L 26 m -> L 10 m -> (L 25 n1, L 10 26)
+backpropagate :: (KnownNat m, KnownNat n1) => L m 10 -> Double -> NNModel n1 -> L 25 m -> L n1 m -> L 26 m -> L 10 m -> NNModel n1
 backpropagate yb lambda (Theta theta1 theta2) z2 a1 a2 a3 =
   let delta3 = a3 - tr yb
       delta2a = tr theta2 <> delta3
@@ -92,9 +93,13 @@ backpropagate yb lambda (Theta theta1 theta2) z2 a1 a2 a3 =
       gradTheta2NonReg  = (d2 / konst m)
 --      regulCoef = lambda / m
 --      gradTheta1 = (d1 / konst m) + (konst regulCoef * theta1) -- TODO not for the first column
-  in (gradTheta1NonReg, gradTheta2NonReg) -- TODO regularization
+  in Theta gradTheta1NonReg gradTheta2NonReg  -- TODO regularization
 
-
+traceMatrix :: (KnownNat m, KnownNat n, 1<=m) => String -> L m n -> L m n
+traceMatrix s m =
+  let line1 = show $ (extract . fst . headTailMatrix) m
+  in  trace (s ++ ": " ++ line1) m
+ 
 
 instance (KnownNat n1) => GradientDescent (NNModel n1 -> (Double, NNModel n1)) where
   data Params (NNModel n1 -> (Double, NNModel n1)) = Params { model :: NNModel n1 }

@@ -1,12 +1,17 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Rank2Types #-}
+
 
 module Main where
 
 import HLearning.NeuralNetwork
 import qualified Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Static
+import Debug.Trace
+import GHC.TypeLits
 
 main = mainCoursera
 
@@ -33,10 +38,22 @@ mainNIST = do
 
 
 mainCoursera = do
-  print "hello world"
+  y <- readCsvFile "/Users/mikael/Documents/boulotmik/projects/coursera/machine-learning-ex4/ex4/ex4_y.csv"
+  x <- readCsvFile "/Users/mikael/Documents/boulotmik/projects/coursera/machine-learning-ex4/ex4/ex4_X.csv"
+  theta1 <- readCsvFile "/Users/mikael/Documents/boulotmik/projects/coursera/machine-learning-ex4/ex4/ex4_theta1.csv"
+  theta2 <- readCsvFile "/Users/mikael/Documents/boulotmik/projects/coursera/machine-learning-ex4/ex4/ex4_theta2.csv"
+  let Just y' = listOfListToMatrix $ fixOctaveLabels y :: Maybe (L 5000 1)
+      y'' = (unrow . tr) $ traceMatrix "y''" y'
+      Just x' = listOfListToMatrix x :: Maybe (L 5000 400)
+      Just theta1' = listOfListToMatrix theta1 :: Maybe (L 25 401)
+      Just theta2' = listOfListToMatrix theta2 :: Maybe (L 10 26)
+      (j, grad) = traceShow "cost" $ cost x' y'' 1 (Theta (traceMatrix "theta1" theta1') (traceMatrix "theta2" theta2'))
+  print $ "cost at parameters loaded from ex4_theta?.csv (should be 0.287629): " ++ (show j)
 
---  mapM putStrLn $ fmap show training
+fixOctaveLabels :: [[Double]] -> [[Double]]
+fixOctaveLabels = fmap $ fmap (\x -> x -1) 
 
+ 
 --readTrainingData :: IO [(Integer, [Integer])]
 readTrainingData = readData "/Users/mikael/Documents/boulotmik/projects/hlearning/data/optdigits.tra"
 readTestData     = readData "/Users/mikael/Documents/boulotmik/projects/hlearning/data/optdigits.tes"
@@ -48,10 +65,10 @@ readCsvFile f =
   in fmap parseCsvFile file
 
   -- returns label, feature vector
-parseCsvLine :: String -> [Int]
-parseCsvLine s = read ("[" ++ s ++ "]") :: [Int]
+parseCsvLine :: String -> [Double]
+parseCsvLine s = read ("[" ++ s ++ "]") :: [Double]
 
-parseCsvFile :: String -> [[Int]]
+parseCsvFile :: String -> [[Double]]
 parseCsvFile s = parseCsvLine <$> lines s
 
 readData f =

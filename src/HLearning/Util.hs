@@ -7,6 +7,7 @@ import GHC.TypeLits
 import Numeric.LinearAlgebra.Static
 import qualified Numeric.LinearAlgebra as LA
 import qualified Data.Vector.Storable as V
+import Debug.Trace
 
 
 toBinMatrix :: (KnownNat n) => R n -> L n 10
