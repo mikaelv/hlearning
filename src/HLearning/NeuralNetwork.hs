@@ -35,7 +35,7 @@ feedForward nnModel x =
       h = tr a3
   in (h, a3, z3, a2, z2, a1)
 
-trainNetwork :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), 1<=m) => R m -> L m n -> NNModel n1 -> NNModel n1
+trainNetwork :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), n ~ (n1-1), 1<=m, 1<=n, 1<=n1, 1<=(n1-1)) => R m -> L m n -> NNModel n1 -> NNModel n1
 trainNetwork y x initModel =
   let  lambda = 1 -- regularisation
        function = cost x y lambda
@@ -66,17 +66,34 @@ parseFile s = unzip $ parseLine <$> lines s
 -- y: label corresponding to training examples
 -- theta1 : nb of rows in hidden layer * (nb_of_features +1)
 -- theta2 : nb of rows in output layer * (nb_of_rows(theta1) +1)
-cost :: (KnownNat m, KnownNat n, KnownNat n1, n1 ~ (1+n), 1<=m) => L m n -> R m -> Double -> NNModel n1 -> (Double, NNModel n1)
+cost :: (KnownNat m, KnownNat n, KnownNat n1, 1<=m, 1<=n, n1 ~ (1+n), n ~ (n1-1), 1<=n1, 1<=(n1-1)) => L m n -> R m -> Double -> NNModel n1 -> (Double, NNModel n1)
 cost x y lambda nnModel =
   let (h, a3, z3, a2, z2, a1) = feedForward nnModel x
       yb = toBinMatrix y
+      thet1 = theta1 nnModel
       jmat = yb * (log h) + (1-yb) * log (1 - h)
       m = fromIntegral $ size y
-      -- TODO regularization
-      j = - (LA.sumElements . extract) jmat / m
+      regul = lambda / (2*m) * regularizeNNModel nnModel
+      j = - (sumElements jmat) / m
       grad = nnModel --backpropagate yb lambda nnModel z2 a1 a2 a3
-  in (j, grad)
+  in (j + regul, grad)
 
+regularizeNNModel :: (KnownNat n1, KnownNat n, 1<=n1, 1<=n, n ~ (n1-1)) => NNModel n1 -> Double
+regularizeNNModel (Theta t1 t2) =
+  let t1' = dropFirstColumn t1
+      t2' = dropFirstColumn t2
+      t1Sq = t1' * t1' -- TODO t1' ^2 works in the REPL but not here !?
+      t2Sq = t2' * t2' -- TODO t1' ^2 works in the REPL but not here !?
+  in sumElements t1Sq + sumElements t2Sq
+
+sumElements :: (KnownNat m, KnownNat n) => L m n -> Double
+sumElements = LA.sumElements . extract
+  
+dropFirstColumn :: forall m n n_1 . (KnownNat m, KnownNat n, KnownNat n_1, 1<=n, n_1 ~ (n-1)) => L m n -> L m n_1
+dropFirstColumn m =
+  let transposedM = (snd . headTailMatrix . tr) m
+  in  tr transposedM
+  
 headTailMatrix :: forall m n . (KnownNat m, KnownNat n, 1<=m) => L m n -> (L 1 n, L (m-1) n)
 headTailMatrix = splitRows
 

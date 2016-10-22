@@ -47,13 +47,17 @@ mainCoursera = do
       Just x' = listOfListToMatrix x :: Maybe (L 5000 400)
       Just theta1' = listOfListToMatrix theta1 :: Maybe (L 25 401)
       Just theta2' = listOfListToMatrix theta2 :: Maybe (L 10 26)
-      (j, grad) = traceShow "cost" $ cost x' y'' 1 (Theta (traceMatrix "theta1" theta1') (traceMatrix "theta2" theta2'))
-  print $ "cost at parameters loaded from ex4_theta?.csv (should be 0.287629): " ++ (show j)
+      nnModel = Theta theta1' theta2'
+      (j0, grad0) = cost x' y'' 0 nnModel
+      (j1, grad1) = cost x' y'' 1 nnModel
+  print $ "cost at parameters loaded from ex4_theta?.csv (should be 0.287629): " ++ (show j0)
+  print $ "regularized cost at parameters loaded from ex4_theta?.csv (should be 0.383770): " ++ (show j1)
+
 
 fixOctaveLabels :: [[Double]] -> [[Double]]
 fixOctaveLabels = fmap $ fmap (\x -> x -1) 
 
- 
+
 --readTrainingData :: IO [(Integer, [Integer])]
 readTrainingData = readData "/Users/mikael/Documents/boulotmik/projects/hlearning/data/optdigits.tra"
 readTestData     = readData "/Users/mikael/Documents/boulotmik/projects/hlearning/data/optdigits.tes"
